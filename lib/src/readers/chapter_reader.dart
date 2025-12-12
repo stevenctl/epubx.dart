@@ -67,14 +67,18 @@ class ChapterReader {
       result.add(chapterRef);
     }
 
-    // If all titles are identical and we have > 1 chapter, fall back to <h1>
-    if (result.length > 1) {
-      var titles = result.map((c) => c.Title).toSet();
-      if (titles.length == 1) {
+    // If 4+ chapters and more than half have the same title, fall back to first <h> tag
+    if (result.length >= 4) {
+      var titleCounts = <String?, int>{};
+      for (var c in result) {
+        titleCounts[c.Title] = (titleCounts[c.Title] ?? 0) + 1;
+      }
+      var maxCount = titleCounts.values.reduce((a, b) => a > b ? a : b);
+      if (maxCount > result.length / 2) {
         for (var i = 0; i < result.length; i++) {
-          var h1Title = _extractH1(htmlContents[i]);
-          if (h1Title != null) {
-            result[i].Title = h1Title;
+          var hTitle = _extractFirstHeading(htmlContents[i]);
+          if (hTitle != null) {
+            result[i].Title = hTitle;
           }
         }
       }
@@ -84,7 +88,7 @@ class ChapterReader {
   }
 
   static final _titleRegex = RegExp(r'<title[^>]*>([^<]*)</title>', caseSensitive: false);
-  static final _h1Regex = RegExp(r'<h1[^>]*>(.*?)</h1>', caseSensitive: false, dotAll: true);
+  static final _headingRegex = RegExp(r'<h[1-6][^>]*>(.*?)</h[1-6]>', caseSensitive: false, dotAll: true);
   static final _tagStripRegex = RegExp(r'<[^>]*>');
 
   static String? _extractTitle(String? html) {
@@ -99,14 +103,14 @@ class ChapterReader {
     return null;
   }
 
-  static String? _extractH1(String? html) {
+  static String? _extractFirstHeading(String? html) {
     if (html == null) return null;
-    var match = _h1Regex.firstMatch(html);
+    var match = _headingRegex.firstMatch(html);
     if (match != null) {
-      var h1Content = match.group(1);
-      if (h1Content != null) {
+      var hContent = match.group(1);
+      if (hContent != null) {
         // Strip inner HTML tags and normalize whitespace
-        var title = h1Content.replaceAll(_tagStripRegex, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+        var title = hContent.replaceAll(_tagStripRegex, '').replaceAll(RegExp(r'\s+'), ' ').trim();
         if (title.isNotEmpty) {
           return title;
         }
