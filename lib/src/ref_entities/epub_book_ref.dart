@@ -56,6 +56,12 @@ class EpubBookRef {
     return ChapterReader.getChapters(this);
   }
 
+  /// Returns chapters based on the spine order, ignoring NCX navigation.
+  /// Useful for EPUBs with incomplete or minimal NCX navigation files.
+  Future<List<EpubChapterRef>> getChaptersFromSpine() async {
+    return ChapterReader.getChaptersFromSpine(this);
+  }
+
   Future<Image?> readCover() async {
     return await BookCoverReader.readBookCover(this);
   }

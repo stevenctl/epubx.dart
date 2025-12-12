@@ -12,6 +12,109 @@ class ChapterReader {
         bookRef, bookRef.Schema!.Navigation!.NavMap!.Points!);
   }
 
+  /// Returns chapters based on the spine order, ignoring NCX navigation.
+  /// Useful for EPUBs with incomplete or minimal NCX navigation files.
+  static Future<List<EpubChapterRef>> getChaptersFromSpine(EpubBookRef bookRef) async {
+    var result = <EpubChapterRef>[];
+    var spine = bookRef.Schema!.Package!.Spine;
+    var manifest = bookRef.Schema!.Package!.Manifest;
+    if (spine == null || manifest == null) {
+      return result;
+    }
+
+    // First pass: build chapters and extract <title> elements
+    var htmlContents = <String>[];
+    for (var spineItem in spine.Items!) {
+      var manifestItem = manifest.Items!.cast().firstWhere(
+            (item) => item.Id == spineItem.IdRef,
+            orElse: () => null,
+          );
+      if (manifestItem == null) continue;
+
+      var href = manifestItem.Href as String?;
+      if (href == null) continue;
+
+      // Prepend content directory path if needed
+      var contentDirectoryPath = bookRef.Schema!.ContentDirectoryPath;
+      var contentFileName = contentDirectoryPath != null && contentDirectoryPath.isNotEmpty
+          ? '$contentDirectoryPath/$href'
+          : href;
+
+      EpubTextContentFileRef? htmlContentFileRef;
+      // Try to find the HTML content file
+      if (bookRef.Content!.Html!.containsKey(contentFileName)) {
+        htmlContentFileRef = bookRef.Content!.Html![contentFileName];
+      } else if (bookRef.Content!.Html!.containsKey(href)) {
+        htmlContentFileRef = bookRef.Content!.Html![href];
+        contentFileName = href;
+      } else {
+        // Skip non-HTML content (like NCX files)
+        continue;
+      }
+
+      var chapterRef = EpubChapterRef(htmlContentFileRef);
+      chapterRef.ContentFileName = contentFileName;
+      chapterRef.SubChapters = <EpubChapterRef>[];
+
+      // Read HTML content and extract <title>
+      String? html;
+      try {
+        html = await htmlContentFileRef?.readContentAsText();
+      } catch (_) {}
+      htmlContents.add(html ?? '');
+
+      chapterRef.Title = _extractTitle(html) ?? manifestItem.Id as String;
+      result.add(chapterRef);
+    }
+
+    // If all titles are identical and we have > 1 chapter, fall back to <h1>
+    if (result.length > 1) {
+      var titles = result.map((c) => c.Title).toSet();
+      if (titles.length == 1) {
+        for (var i = 0; i < result.length; i++) {
+          var h1Title = _extractH1(htmlContents[i]);
+          if (h1Title != null) {
+            result[i].Title = h1Title;
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  static final _titleRegex = RegExp(r'<title[^>]*>([^<]*)</title>', caseSensitive: false);
+  static final _h1Regex = RegExp(r'<h1[^>]*>(.*?)</h1>', caseSensitive: false, dotAll: true);
+  static final _tagStripRegex = RegExp(r'<[^>]*>');
+
+  static String? _extractTitle(String? html) {
+    if (html == null) return null;
+    var match = _titleRegex.firstMatch(html);
+    if (match != null) {
+      var title = match.group(1)?.trim();
+      if (title != null && title.isNotEmpty) {
+        return title;
+      }
+    }
+    return null;
+  }
+
+  static String? _extractH1(String? html) {
+    if (html == null) return null;
+    var match = _h1Regex.firstMatch(html);
+    if (match != null) {
+      var h1Content = match.group(1);
+      if (h1Content != null) {
+        // Strip inner HTML tags and normalize whitespace
+        var title = h1Content.replaceAll(_tagStripRegex, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (title.isNotEmpty) {
+          return title;
+        }
+      }
+    }
+    return null;
+  }
+
   static List<EpubChapterRef> getChaptersImpl(
       EpubBookRef bookRef, List<EpubNavigationPoint> navigationPoints) {
     var result = <EpubChapterRef>[];
